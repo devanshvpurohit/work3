@@ -1,108 +1,111 @@
 import streamlit as st
 import google.generativeai as genai
-from dotenv import load_dotenv
 import os
-import pandas as pd
-import datetime
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import PyPDF2
-import yaml
-import streamlit_authenticator as stauth
-import plotly.express as px
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+from PyPDF2 import PdfReader
+import uuid
 
 # Load environment variables
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+model = genai.GenerativeModel("gemini-pro")
 
-# Load authentication config
-with open("credentials.yaml") as file:
-    config = yaml.safe_load(file)
+# Simulated storage for version control and calendar events
+CONTRACTS_DB = {}
+EVENTS_DB = []
 
-authenticator = stauth.Authenticate(
-    config["credentials"], config["cookie"]["name"],
-    config["cookie"]["key"], config["cookie"]["expiry_days"]
-)
+st.set_page_config(page_title="📺 Aha Rights Manager AI", layout="wide")
+st.markdown("""
+    <style>
+    .big-font { font-size:22px !important; }
+    .highlight { background-color: #ffe4b5; padding: 0.5em; border-radius: 5px; }
+    </style>
+    """, unsafe_allow_html=True)
 
-name, authentication_status, username = authenticator.login("Login", location="sidebar")
+st.title("🎬 Aha AI Rights & Licensing Manager")
+st.markdown("""
+    <p class='big-font'>Empowering content compliance with AI — Analyze, Track, and Alert with Ease.</p>
+    <hr>
+""", unsafe_allow_html=True)
 
+uploaded_file = st.file_uploader("📄 Upload Licensing Contract (.pdf/.txt)", type=["txt", "pdf"])
 
-if authentication_status is False:
-    st.error("Username/password is incorrect")
-elif authentication_status is None:
-    st.warning("Please enter your username and password")
-elif authentication_status:
+# Filters
+with st.sidebar:
+    st.header("🔎 Search & Filter")
+    party_filter = st.text_input("Filter by Party")
+    region_filter = st.text_input("Filter by Region")
+    type_filter = st.selectbox("Contract Type", ["All", "Original", "Exclusive", "Acquisition"])
+    date_filter = st.date_input("Filter by Start Date")
 
-    st.sidebar.title(f"Welcome, {name}")
-    authenticator.logout("Logout", "sidebar")
+def extract_text(file):
+    if file.name.endswith(".txt"):
+        return file.read().decode("utf-8")
+    elif file.name.endswith(".pdf"):
+        pdf = PdfReader(file)
+        return "\n".join(page.extract_text() for page in pdf.pages if page.extract_text())
+    return ""
 
-    st.title("📺 Aha Content Rights & Licensing AI")
+def analyze_contract(text):
+    prompt = f"""
+    You are an AI contract assistant for Aha OTT. 
+    Extract the following from the contract:
+    - Title
+    - Parties Involved
+    - License Duration, Start and Expiry Date
+    - Regions granted
+    - Type (Original, Exclusive, Acquisition)
+    - Exclusivity
+    - Termination Conditions
+    - Risky Clauses or Compliance Flags
+    Return the result in bullet format.
 
-    # Connect to Google Sheets
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("gspread-cred.json", scope)
-    client = gspread.authorize(creds)
-    sheet = client.open_by_key("YOUR_SHEET_ID").sheet1  # Replace with your actual Sheet ID
+    Contract:
+    {text}
+    """
+    response = model.generate_content(prompt)
+    return response.text
 
-    # Initialize Gemini Model
-    model = genai.GenerativeModel("gemini-pro")
+def add_to_calendar(title, expiry_date):
+    EVENTS_DB.append({"event": title, "date": expiry_date})
+    st.success(f"📅 Alert set for {title} expiring on {expiry_date}")
 
-    def extract_text_from_pdf(file):
-        reader = PyPDF2.PdfReader(file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text()
-        return text
+def simulate_risk_score(analysis):
+    return 87 if "termination" in analysis.lower() else 45
 
-    def analyze_contract(text, model):
-        prompt = f"Analyze the following contract:\n\n{text}\n\nHighlight key clauses, renewal terms, rights granted, restrictions, and expiration dates."
-        result = model.generate_content(prompt)
-        return result.text
+if uploaded_file:
+    with st.spinner("🔍 Analyzing contract..."):
+        contract_text = extract_text(uploaded_file)
+        analysis = analyze_contract(contract_text)
+        contract_id = str(uuid.uuid4())
+        CONTRACTS_DB[contract_id] = {
+            "text": contract_text,
+            "analysis": analysis,
+            "timestamp": datetime.now().isoformat()
+        }
 
-    def log_to_sheet(filename, analysis, upload_date):
-        sheet.append_row([filename, analysis, upload_date])
+        st.subheader("📑 Clause-Based Analysis")
+        st.markdown(f"<div class='highlight'>{analysis}</div>", unsafe_allow_html=True)
 
-    def get_sheet_data():
-        data = sheet.get_all_records()
-        return pd.DataFrame(data)
+        # Risk Score
+        risk_score = simulate_risk_score(analysis)
+        st.metric(label="⚖️ Legal Risk Score", value=f"{risk_score}%")
 
-    st.subheader("Upload Contract")
-    uploaded_file = st.file_uploader("Upload PDF", type="pdf")
+        # Set Alert
+        expiry_input = st.date_input("📆 Enter License Expiry Date to Schedule Alert")
+        if st.button("Set Renewal Alert"):
+            add_to_calendar(uploaded_file.name, expiry_input)
 
-    if uploaded_file:
-        text = extract_text_from_pdf(uploaded_file)
-        analysis = analyze_contract(text, model)
-        st.subheader("📄 AI Contract Analysis")
-        st.write(analysis)
+        # Version control view
+        st.subheader("🗂️ Version Control")
+        for cid, data in CONTRACTS_DB.items():
+            st.markdown(f"**Version ID**: `{cid}` | ⏰ Uploaded at: `{data['timestamp']}`")
+            with st.expander("View Analysis"):
+                st.code(data["analysis"], language="markdown")
 
-        if st.button("Save to Log"):
-            today = datetime.date.today().strftime("%Y-%m-%d")
-            log_to_sheet(uploaded_file.name, analysis, today)
-            st.success("Logged to Google Sheets ✅")
-
-    st.subheader("📚 Contract History")
-
-    df = get_sheet_data()
-
-    # Search and filters
-    with st.expander("🔍 Search / Filter"):
-        name_filter = st.text_input("Filter by Filename")
-        date_filter = st.date_input("Filter by Upload Date", value=None)
-
-        if name_filter:
-            df = df[df["filename"].str.contains(name_filter, case=False)]
-        if date_filter:
-            df = df[df["upload_date"] == date_filter.strftime("%Y-%m-%d")]
-
-    # Auto-expiry tagging (example logic)
-    df["Status"] = df["analysis"].apply(lambda x: "⚠️ Expired" if "expired" in x.lower() else "✅ Active")
-
-    st.dataframe(df)
-
-    st.download_button("📥 Export Log to CSV", df.to_csv(index=False), file_name="contract_log.csv")
-
-    # Visual summary
-    st.subheader("📊 Summary Visualization")
-    status_counts = df["Status"].value_counts().reset_index()
-    fig = px.pie(status_counts, names="index", values="Status", title="Contract Status Overview")
-    st.plotly_chart(fig)
+# Calendar View
+st.sidebar.subheader("📅 Upcoming Expiry Alerts")
+for event in EVENTS_DB:
+    st.sidebar.warning(f"🔔 {event['event']} → {event['date']}")
