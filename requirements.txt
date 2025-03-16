@@ -1,0 +1,10 @@
+streamlit
+google-generativeai
+python-dotenv
+gspread
+oauth2client
+pandas
+PyPDF2
+pyyaml
+streamlit-authenticator
+plotly
