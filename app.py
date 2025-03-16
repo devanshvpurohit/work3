@@ -109,3 +109,4 @@ if uploaded_file:
 st.sidebar.subheader("📅 Upcoming Expiry Alerts")
 for event in EVENTS_DB:
     st.sidebar.warning(f"🔔 {event['event']} → {event['date']}")
+
