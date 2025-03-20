@@ -5,18 +5,19 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 import uuid
+import json
 
 # Load environment variables
 load_dotenv()
 os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-model = genai.GenerativeModel("gemini-pro")
+model = genai.GenerativeModel("gemini-flash")
 
 # Simulated storage for version control and calendar events
 CONTRACTS_DB = {}
 EVENTS_DB = []
 
-st.set_page_config(page_title="📺 Aha Rights Manager AI", layout="wide")
+st.set_page_config(page_title="📜 LEXIGUARD359", layout="wide")
 st.markdown("""
     <style>
     .big-font { font-size:22px !important; }
@@ -24,13 +25,13 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🎬 Aha AI Rights & Licensing Manager")
+st.title("⚖️ LEXIGUARD359: AI-Powered Compliance & Risk Management")
 st.markdown("""
-    <p class='big-font'>Empowering content compliance with AI — Analyze, Track, and Alert with Ease.</p>
+    <p class='big-font'>Ensuring Legal Compliance & Risk Mitigation with AI-Powered Contract Analysis.</p>
     <hr>
 """, unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("📄 Upload Licensing Contract (.pdf/.txt)", type=["txt", "pdf"])
+uploaded_file = st.file_uploader("📄 Upload Legal Contract (.pdf/.txt)", type=["txt", "pdf"])
 
 # Filters
 with st.sidebar:
@@ -50,30 +51,29 @@ def extract_text(file):
 
 def analyze_contract(text):
     prompt = f"""
-    You are an AI contract assistant for Aha OTT. 
-    Extract the following from the contract:
-    - Title
-    - Parties Involved
-    - License Duration, Start and Expiry Date
-    - Regions granted
-    - Type (Original, Exclusive, Acquisition)
-    - Exclusivity
-    - Termination Conditions
-    - Risky Clauses or Compliance Flags
-    Return the result in bullet format.
+    You are an AI legal assistant. Extract and structure the following:
+    1. **Compliance Summary**: Overall compliance assessment.
+    2. **Clause Risk Heatmap**: Identify high-risk clauses and highlight them.
+    3. **Risk Trends Overview**: Show trends based on prior analyses.
+    4. **Category-wise Clause Risk Analysis**: Break down risks by clause categories (e.g., termination, liability, exclusivity).
+    Return the results in structured JSON format.
 
     Contract:
     {text}
     """
     response = model.generate_content(prompt)
-    return response.text
+    try:
+        return json.loads(response.text)  # Ensure structured JSON output
+    except json.JSONDecodeError:
+        return {"error": "Invalid response format from AI model."}
 
 def add_to_calendar(title, expiry_date):
     EVENTS_DB.append({"event": title, "date": expiry_date})
     st.success(f"📅 Alert set for {title} expiring on {expiry_date}")
 
 def simulate_risk_score(analysis):
-    return 87 if "termination" in analysis.lower() else 45
+    high_risk_clauses = len([clause for clause in analysis.get("Clause Risk Heatmap", []) if clause["risk_level"] == "high"])
+    return min(100, 50 + high_risk_clauses * 10)
 
 if uploaded_file:
     with st.spinner("🔍 Analyzing contract..."):
@@ -86,12 +86,25 @@ if uploaded_file:
             "timestamp": datetime.now().isoformat()
         }
 
-        st.subheader("📑 Clause-Based Analysis")
-        st.markdown(f"<div class='highlight'>{analysis}</div>", unsafe_allow_html=True)
+        st.subheader("📜 Compliance Summary")
+        st.markdown(f"<div class='highlight'>{analysis.get('Compliance Summary', 'No summary available.')}</div>", unsafe_allow_html=True)
+
+        st.subheader("🔥 Clause Risk Heatmap")
+        for clause in analysis.get("Clause Risk Heatmap", []):
+            st.warning(f"⚠️ {clause['clause']}: {clause['risk_level']}")
+
+        st.subheader("📊 Risk Trends Overview")
+        st.line_chart([simulate_risk_score(a["analysis"]) for a in CONTRACTS_DB.values()])
+
+        st.subheader("📌 Category-wise Clause Risk Analysis")
+        for category, risks in analysis.get("Category-wise Clause Risk Analysis", {}).items():
+            st.write(f"### {category}")
+            for risk in risks:
+                st.write(f"- {risk}")
 
         # Risk Score
         risk_score = simulate_risk_score(analysis)
-        st.metric(label="⚖️ Legal Risk Score", value=f"{risk_score}%")
+        st.metric(label="⚠️ Legal Risk Score", value=f"{risk_score}%")
 
         # Set Alert
         expiry_input = st.date_input("📆 Enter License Expiry Date to Schedule Alert")
@@ -103,10 +116,9 @@ if uploaded_file:
         for cid, data in CONTRACTS_DB.items():
             st.markdown(f"**Version ID**: `{cid}` | ⏰ Uploaded at: `{data['timestamp']}`")
             with st.expander("View Analysis"):
-                st.code(data["analysis"], language="markdown")
+                st.code(json.dumps(data["analysis"], indent=2), language="json")
 
 # Calendar View
 st.sidebar.subheader("📅 Upcoming Expiry Alerts")
 for event in EVENTS_DB:
     st.sidebar.warning(f"🔔 {event['event']} → {event['date']}")
-
